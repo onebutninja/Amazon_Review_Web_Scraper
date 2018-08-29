@@ -199,10 +199,10 @@ t1 = time.time()
 print('Total time elapsed', round(t1-t0,2))
 
 
-### This section is for grabing whatever pages were missed in the initial scrape 
+### This section is for grabing whatever pages were missed in the initial scrape ###
 
 # Import review csv
-df = pd.read_csv('Reviews_5.9th_attempt.csv', index_col = 0, dtype = {'found_helpful':object})
+df = pd.read_csv('Reviews_1st_run.csv', index_col = 0, dtype = {'found_helpful':object})
 
 # Get rid of duplicate reviews
 df.drop_duplicates(['id'], inplace = True)
@@ -219,4 +219,4 @@ pages = [x for x in pages if x not in df_pages]
 # Number of pages that were missed
 Print('Number of pages missed ', len(pages))
 
-### After running all of the code the Review Scraper can be ran again and again till the above print statement returns a 0
+### After running all of the code the Review Scraper can be ran again and again till the above print statement returns a 0 ###
