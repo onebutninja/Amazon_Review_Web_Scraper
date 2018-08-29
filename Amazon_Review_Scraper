@@ -1,0 +1,222 @@
+########################
+### Import libraries ###
+########################
+
+from bs4 import BeautifulSoup
+import pandas as pd
+import requests
+import re
+from time import sleep
+import time
+
+
+##########################
+### Initialize Scraper ###
+##########################
+
+# url for the first page of reviews
+initial_url = "https://www.amazon.com/All-New-Fire-TV-Stick-With-Alexa-Voice-Remote-Streaming-Media-Player/product-reviews/B00ZV9RDKK/ref=cm_cr_dp_d_show_all_btm?ie=UTF8&reviewerType=all_reviews"
+
+# Create text variables for building initial url
+page_num = '&pageNumber=1'
+page_size = '&pageSize=50'
+
+# Build base url
+if page_num not in initial_url:
+    base_url = initial_url+page_num+page_size
+else:
+    base_url = initial_url+page_size
+
+# Request url page source to find total number of pages of reviews
+html = requests.get(base_url).text
+
+# Parse to make soup
+soup = BeautifulSoup(html, 'html.parser')
+
+# Create list variable page numbers 
+page_numbers = []
+
+# Pull page numbers from soup and insert into page_numbers list
+for li in soup.find_all('li', attrs={'class':'page-button'}):
+    page_numbers.append(li.text)
+
+# Pull last item in page_numbers, which will be the max number of pages of reviews 
+last_page = int(page_numbers[-1].replace(',',''))+1
+
+# Create list of 1 through last_page for iterating through in the scraper
+page = list(range(1, last_page))
+pages = [str(item) for item in page]
+
+# Create reviews list variable, this is where the data pulled from the scraper will be stored
+# before being inseted into a dataframe
+reviews = []
+
+
+######################
+### Review Scraper ###
+######################
+
+# Start timer for total time scraper takes
+t0 = time.time()
+
+# Loop through to scrape each page in pages 
+for num in pages:
+    
+    # Start timer for time taken to scrape page
+    t2 = time.time()
+
+    # Create url for current page to scrape
+    url = re.sub('pageNumber=\d+', 'pageNumber='+num, base_url)
+    
+
+    # Request url page source
+    html = requests.get(url).text
+
+    # Parse to make soup
+    soup = BeautifulSoup(html, 'html.parser')
+
+    # Create new soup element for just the section of html that has review data
+    review_box = soup.find('div', attrs={'id':'cm_cr-review_list'})
+
+    # Convert soup object to string for getting review ids
+    review_box_str = str(review_box)
+
+    # Get and construct list of review ids
+    review_id_pattern = 'customer_review-[A-Z0-9]+'
+    review_id_string = list(set(re.findall(review_id_pattern, review_box_str)))
+    review_ids = [item[item.find('R'):] for item in review_id_string]
+    
+    # Set trys counter to zero for following while loop
+    trys = 0
+    
+    # If initial html request comes back without review data try request again
+    # Repeated till data is succesfully gathered or has tried 7 times
+    while len(review_ids) == 0:
+        
+        # Print current page and error message
+        print(num, 'Error, retrying.')
+        
+        # Inset wait time between loops to give the internet a chance to speed up
+        sleep(2.2)
+
+        # Request url page source
+        html = requests.get(url).text
+
+        # Parse to make soup
+        soup = BeautifulSoup(html, 'html.parser')
+
+        # Create new soup element for just the section of html that has review data
+        review_box = soup.find('div', attrs={'id':'cm_cr-review_list'})
+
+        # Convert soup object to string for getting review ids
+        review_box_str = str(review_box)
+
+        # Get and construct list of review ids
+        review_id_pattern = 'customer_review-[A-Z0-9]+'
+        review_id_string = list(set(re.findall(review_id_pattern, review_box_str)))
+        review_ids = [item[item.find('R'):] for item in review_id_string]
+        
+        # Add try to trys
+        trys += 1
+        
+        # If statement to keep loop from running for forever
+        if trys == 7:
+            
+            # Print current page number and that this was the last try for this page,
+            # whether this attempt was succesful or not.
+            print(num, 'Last try')
+            
+            # End while loop
+            break 
+
+    # Set iteration counter for the following for loop
+    iteration = 0
+
+    # loop through to get data for each review in review_ids
+    for i in review_ids:
+        individual_review = review_box.find('div', attrs={'id':i})
+
+        # create row list variable to store attributes of review
+        row = []
+
+        # Get review id for current review
+        row.append(review_ids[iteration])
+        
+        # Get page number for current page
+        row.append(num)
+
+        # Get date of review
+        row.append(individual_review.find('span', attrs={'data-hook':'review-date'}).text)
+
+        # Get title of review
+        row.append(individual_review.find('a', attrs={'class':'a-size-base a-link-normal review-title a-color-base a-text-bold'}).text)
+
+        # Get rating of review
+        rating_pattern = '\d.\d out of 5 stars'
+        rating_string = re.match(rating_pattern, individual_review.text).group(0)
+        row.append(rating_string)
+
+        # Get scalar boolean of whther or not reviewer is varified purchaser
+        row.append(len(individual_review.find_all('span', attrs={'data-hook':'avp-badge'})))
+
+        # Get reveiw helpfulness rating
+        if individual_review.find('span', attrs={'data-hook':'helpful-vote-statement'}) == None:
+            row.append("0")
+        elif (individual_review.find('span', attrs={'data-hook':'helpful-vote-statement'}).text == "One person found this helpful"):
+            row.append("1")
+        else:
+            row.append(individual_review.find('span', attrs={'data-hook':'helpful-vote-statement'}).text[:-26])
+
+        # Get body of review
+        row.append(individual_review.find('span', attrs={'data-hook':'review-body'}).text)
+        
+        # Store url
+        row.append(url)
+
+        # Store review row in reviews
+        reviews.append(row)
+        
+        # Add 1 to iteration counter
+        iteration += 1
+        
+    # Inset wait time between loops to avoid over burdening Amazon's servers
+    sleep(1.2)
+    
+    # End timer for time taken to scrape page
+    t3= time.time()
+    
+    # Print 
+    print(num, round(t3 - t2,2), '            ', len(review_ids), 'reviews')
+
+# Create column names list variable
+column_names = 'id page_number date title rating varified_purchase found_helpful body url'.split()
+    
+# Creat dataframe from scraped data and save as csv
+pd.DataFrame(reviews, columns = column_names).to_csv('Reviews_5.9th_attempt.csv')
+
+# 
+t1 = time.time()
+print('Total time elapsed', round(t1-t0,2))
+
+
+### This section is for grabing whatever pages were missed in the initial scrape 
+
+# Import review csv
+df = pd.read_csv('Reviews_5.9th_attempt.csv', index_col = 0, dtype = {'found_helpful':object})
+
+# Get rid of duplicate reviews
+df.drop_duplicates(['id'], inplace = True)
+
+# Make list of page numbers contained in df
+df_page = list(df['page_number'].unique())
+
+# Convert df_page numbers to list of strings
+df_pages = [str(item) for item in df_page]
+
+# Update pages variable to only contain pages that haver not been successfully retrieved
+pages = [x for x in pages if x not in df_pages]
+
+# Number of pages that were missed
+Print('Number of pages missed ', len(pages))
+
+### After running all of the code the Review Scraper can be ran again and again till the above print statement returns a 0
